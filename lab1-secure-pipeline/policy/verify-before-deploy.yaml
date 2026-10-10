@@ -1,0 +1,34 @@
+# The other half of signing: signatures are worthless unless something REFUSES
+# unsigned images. A signed image that nobody verifies has bought you nothing.
+#
+# This is a Kyverno policy. Apply it to the Lab 3 kind cluster:
+#   helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+#   kubectl apply -f policy/verify-before-deploy.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signature
+spec:
+  validationFailureAction: Enforce      # Audit first in a real rollout, then Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: check-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["production"]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/*/*"
+          attestors:
+            - entries:
+                - keyless:
+                    # Identity, not key. This says "signed by THIS workflow",
+                    # which is a much more useful statement than "signed by
+                    # someone holding a key we handed out".
+                    subject: "https://github.com/YOUR_ORG/YOUR_REPO/.github/workflows/build.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev

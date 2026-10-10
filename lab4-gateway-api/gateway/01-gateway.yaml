@@ -1,0 +1,23 @@
+# Owned by infra. App teams never touch this file.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: lab-gateway
+  namespace: lab3
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "*.localdev.me"
+      allowedRoutes:
+        # THE control the Ingress API never had: infra decides which namespaces
+        # may attach routes to this listener. Under Ingress, anyone who could
+        # create an Ingress could claim any hostname — including one already in
+        # use by another team. That collision was a real, common outage.
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: lab3

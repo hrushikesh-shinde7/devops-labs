@@ -1,0 +1,17 @@
+# STEP 2 — Gateway API, and the role split that is the whole point.
+#
+#   GatewayClass  -> INFRASTRUCTURE team. "here is the kind of proxy we run"
+#   Gateway       -> INFRASTRUCTURE team. "here is the listener, port and TLS"
+#   HTTPRoute     -> APPLICATION team.    "here is how MY traffic is routed"
+#
+# Under Ingress, all three lived in one object every team had to edit. Say this
+# out loud in an interview and you have shown you understand WHY the API exists.
+#
+# Installed by `make gateway` — Envoy Gateway creates this GatewayClass itself,
+# so this file is here to read, not to apply. Left as a reference.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller

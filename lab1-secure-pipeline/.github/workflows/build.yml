@@ -1,0 +1,166 @@
+name: build-sign-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The single most important block in this file.
+#
+# Default GITHUB_TOKEN permissions are broad. Declare the minimum, at the top,
+# and every job inherits it. `id-token: write` is what lets the runner mint a
+# short-lived OIDC token — it is NOT a permission to write to the repo.
+permissions:
+  contents: read
+  packages: write         # push to GHCR
+  id-token: write         # OIDC: keyless cosign + cloud federation
+  attestations: write     # provenance attestation
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Scan the SOURCE before building. Failing here is cheaper than
+      #     failing after a 4-minute image build.
+      - name: Scan dependencies
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"            # EXERCISE 2: this is the line that fails the build
+          ignore-unfixed: true      # don't block on CVEs with no available patch
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true          # SLSA provenance attached to the image
+          sbom: true
+
+      # --- Scan the built IMAGE too. Source scanning misses everything the
+      #     base image brings with it — and that is usually most of the CVEs.
+      - name: Scan image
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  sbom-and-sign:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # KEYLESS signing. There is no private key anywhere — not in a secret,
+      # not on the runner, not in a vault.
+      #
+      # What actually happens: the runner presents its OIDC identity to
+      # Fulcio, which issues a certificate valid for ~10 minutes; the signature
+      # and certificate are recorded in Rekor, a public append-only
+      # transparency log. The key material is discarded.
+      #
+      # What this PROVES: this exact digest was built by this workflow, in this
+      # repo, on this ref.
+      # What it does NOT prove: that the code is any good. Provenance is not
+      # quality. Be precise about this in an interview.
+      - name: Sign image (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign --yes \
+            "${REGISTRY}/${IMAGE}@${{ needs.build.outputs.digest }}"
+
+      # Attach the SBOM to the image as a signed attestation, so it travels
+      # WITH the artifact instead of rotting in a CI artifact bucket nobody
+      # can find six months later.
+      - name: Attest SBOM
+        run: |
+          cosign attest --yes \
+            --predicate sbom.cdx.json \
+            --type cyclonedx \
+            "${REGISTRY}/${IMAGE}@${{ needs.build.outputs.digest }}"
+
+      - name: Verify what we just signed
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${REGISTRY}/${IMAGE}@${{ needs.build.outputs.digest }}"
+
+  deploy:
+    needs: [build, sbom-and-sign]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production        # gives you required reviewers + an audit trail
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # THE point of this lab.
+      #
+      # No AZURE_CLIENT_SECRET. No stored service-principal password. Nothing
+      # to rotate, nothing to leak in a log, nothing an ex-employee keeps.
+      # The runner presents a short-lived OIDC token; Entra ID trusts it
+      # because of the federated credential created in terraform/oidc.tf,
+      # scoped to THIS repo and THIS branch.
+      - name: Azure login via workload identity federation
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}        # a var, not a secret — it is not sensitive
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Prove it worked
+        run: az account show

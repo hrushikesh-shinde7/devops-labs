@@ -1,0 +1,35 @@
+# The BEFORE state — what you run today.
+services:
+  api:
+    build:
+      context: ..
+      target: runtime
+    image: lab3-api:local
+    ports: ["8000:8000"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      target: runtime
+    image: lab3-api:local
+    command: ["python", "worker.py"]
+    entrypoint: []
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes: ["redisdata:/data"]
+
+volumes:
+  redisdata:

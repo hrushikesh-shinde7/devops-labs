@@ -1,0 +1,39 @@
+# The canary needs its own path to Redis.
+#
+# Lab 3's `redis-allow-app-only` policy permits only pods labelled `app: api`
+# or `app: worker`. The canary is `app: api-canary`, so its Redis traffic is
+# DROPPED — and the symptom is worth memorising:
+#
+#   Readiness probe failed: Get "http://.../healthz/ready":
+#   context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+#
+# NOT "connection refused". A NetworkPolicy **drops** packets; it does not
+# reject them. So the client sits there until something times out:
+#
+#   dropped  -> timeout / "context deadline exceeded"   <- NetworkPolicy, firewall
+#   rejected -> "connection refused"                    <- nothing listening, wrong port
+#
+# Those two symptoms point at completely different causes, and telling them
+# apart on the spot is one of the more useful reflexes you can build.
+#
+# The wider lesson: adding a new workload to a namespace with default-deny
+# style policies means adding a policy for it. Nothing warns you — the pod
+# just never goes Ready.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-canary
+  namespace: lab3
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-canary
+      ports:
+        - protocol: TCP
+          port: 6379

@@ -1,0 +1,88 @@
+# Compose: `api:` with ports: ["8000:8000"] and restart: unless-stopped.
+# K8s:     Deployment (the control loop that keeps N replicas alive) +
+#          Service (the stable name/VIP other pods talk to).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: lab3
+  labels:
+    app: api
+spec:
+  replicas: 2                      # Compose had 1. This is the whole point.
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0            # never go below desired during a rollout
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: lab3-api:local
+          imagePullPolicy: IfNotPresent     # kind loads the image locally
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          # --- The three probes. Getting these wrong causes outages. ---
+          startupProbe:                     # "has it finished booting?"
+            httpGet: { path: /healthz/live, port: http }
+            failureThreshold: 30            # 30 × 2s = 60s grace to start
+            periodSeconds: 2
+          livenessProbe:                    # "is it wedged? restart it"
+            httpGet: { path: /healthz/live, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:                   # "should it get traffic?"
+            httpGet: { path: /healthz/ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }   # what the SCHEDULER uses
+            limits:   { memory: 256Mi }              # what the KERNEL enforces
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}                      # readOnlyRootFilesystem needs this
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: lab3
+spec:
+  type: ClusterIP
+  selector:
+    app: api                                # matches POD labels, not Deployment
+  ports:
+    - port: 80
+      targetPort: http
+      name: http

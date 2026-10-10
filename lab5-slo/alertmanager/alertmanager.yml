@@ -1,0 +1,37 @@
+# The routing tree is where "page" and "ticket" stop being just labels.
+# An alert with severity=ticket must NEVER reach a phone. If it can, your
+# team will learn to ignore the phone — and that is how real pages get missed.
+route:
+  receiver: default
+  group_by: ["alertname", "slo"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity = "page"']
+      receiver: pager
+      group_wait: 10s          # pages should not wait to be batched
+      repeat_interval: 1h
+    - matchers: ['severity = "ticket"']
+      receiver: tickets
+      repeat_interval: 24h
+
+receivers:
+  - name: default
+  - name: pager
+    # In real life: pagerduty_configs / opsgenie_configs. Left as a webhook so
+    # the lab runs with no external account.
+    webhook_configs:
+      - url: http://alertmanager:9093/-/healthy
+        send_resolved: true
+  - name: tickets
+    webhook_configs:
+      - url: http://alertmanager:9093/-/healthy
+        send_resolved: true
+
+inhibit_rules:
+  # If the fast burn is already paging, don't also page for the medium burn —
+  # one incident, one page.
+  - source_matchers: ['alertname = "OrdersAPIErrorBudgetFastBurn"']
+    target_matchers: ['alertname = "OrdersAPIErrorBudgetMediumBurn"']
+    equal: ["slo"]

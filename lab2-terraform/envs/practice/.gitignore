@@ -1,0 +1,8 @@
+# NEVER commit state — it contains secrets in plaintext
+*.tfstate
+*.tfstate.*
+.terraform/
+# .terraform.lock.hcl IS committed deliberately -- it pins provider versions,
+# which is the whole point of having it. (envs/dev excludes it only because
+# that environment is ephemeral and billable.)
+generated/

@@ -1,0 +1,13 @@
+# Terraform state contains every attribute in PLAINTEXT, including generated
+# passwords. sensitive = true only masks CLI output. Never commit it.
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# local / environment
+.env
+*.pem
+*.key
+kubeconfig*
+*.log
+.DS_Store

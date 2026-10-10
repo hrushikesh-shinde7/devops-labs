@@ -1,0 +1,28 @@
+[
+  { "op": "remove", "path": "/spec/template/spec/containers/0/startupProbe" },
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/livenessProbe",
+    "value": {
+      "httpGet": { "path": "/healthz/live", "port": "http" },
+      "periodSeconds": 5,
+      "timeoutSeconds": 1,
+      "failureThreshold": 3
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/readinessProbe",
+    "value": {
+      "httpGet": { "path": "/healthz/ready", "port": "http" },
+      "periodSeconds": 2,
+      "timeoutSeconds": 2,
+      "failureThreshold": 2
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/env",
+    "value": [{ "name": "SLOW_MODE", "value": "true" }]
+  }
+]

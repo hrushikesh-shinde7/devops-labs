@@ -1,0 +1,34 @@
+# STEP 1 — the BEFORE state. This is what most clusters still run in 2026.
+#
+# The Ingress *API* is GA and is NOT being removed. What ended is the community
+# controller `kubernetes/ingress-nginx`, EOL March 2026 — no patches, no CVE
+# fixes. If you are still serving traffic through it, you are running an
+# unpatched, internet-facing proxy.
+#
+# Note everything crammed into one object below: TLS, hostname, path routing,
+# AND controller-specific behaviour smuggled in via annotations. That mixing of
+# infra concerns and app concerns is the design flaw Gateway API set out to fix.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-legacy
+  namespace: lab3
+  annotations:
+    # Every one of these is vendor-specific. None of it is portable. This is
+    # why "just switch ingress controllers" was never actually simple.
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: lab3.localdev.me
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific    # <- the escape hatch that broke portability
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80

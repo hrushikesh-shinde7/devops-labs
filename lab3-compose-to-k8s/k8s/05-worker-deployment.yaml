@@ -1,0 +1,44 @@
+# Compose: `worker:` — same image, different command.
+# K8s:     a separate Deployment. No Service: nothing calls it, it pulls work.
+#          No readiness probe for the same reason — it serves no traffic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: lab3
+  labels:
+    app: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30     # let an in-flight job finish
+      containers:
+        - name: worker
+          image: lab3-api:local
+          imagePullPolicy: IfNotPresent
+          command: ["python", "worker.py"]  # overrides the image ENTRYPOINT+CMD
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { memory: 256Mi }

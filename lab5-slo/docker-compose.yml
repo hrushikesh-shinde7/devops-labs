@@ -1,0 +1,47 @@
+services:
+  api:
+    build: .
+    image: lab5-api:local
+    ports: ["8000:8000"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      # Read from the shell so `make break-errors` can flip them without
+      # editing this file. The :-0 default keeps `make up` clean.
+      INJECT_ERROR_RATE: "${INJECT_ERROR_RATE:-0}"
+      INJECT_SLOW_RATE: "${INJECT_SLOW_RATE:-0}"
+    depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle          # POST /-/reload instead of restarting
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    ports: ["9093:9093"]
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    ports: ["3000:3000"]
+    environment:
+      # Deliberate: this Grafana is local, throwaway and never exposed. A weak
+      # password here is correct; the mistake would be carrying this pattern
+      # into anything real, where it would come from a secret store.
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]

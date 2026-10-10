@@ -1,0 +1,16 @@
+# Only for kind: exposes the api on http://localhost:8080 via the port mapping
+# in kind-config.yaml. In a real cluster you would use an Ingress or a Gateway
+# (that is Lab 4) — NodePort is a debugging convenience, not a production door.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-nodeport
+  namespace: lab3
+spec:
+  type: NodePort
+  selector:
+    app: api
+  ports:
+    - port: 80
+      targetPort: http
+      nodePort: 30080

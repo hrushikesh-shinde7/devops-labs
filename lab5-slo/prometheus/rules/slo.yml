@@ -1,0 +1,170 @@
+# ---------------------------------------------------------------------------
+# The SLO
+#
+#   SLI:       proportion of /api/orders requests that do NOT return 5xx
+#   SLO:       99.5% over a rolling 30 days
+#   Budget:    0.5%  ->  ~3h 39m of total unavailability per 30 days
+#
+# Everything below exists to answer one question: is that budget in danger?
+# ---------------------------------------------------------------------------
+groups:
+  - name: slo_sli
+    interval: 30s
+    rules:
+      # Recording rules pre-compute the expensive parts. Without them, a
+      # dashboard with six burn-rate windows re-scans 30 days of samples on
+      # every refresh — this is the difference between a dashboard that loads
+      # and one that times out.
+      - record: sli:http_errors:ratio_rate5m
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[5m]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[5m]))
+
+      - record: sli:http_errors:ratio_rate30m
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[30m]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[30m]))
+
+      - record: sli:http_errors:ratio_rate1h
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[1h]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[1h]))
+
+      - record: sli:http_errors:ratio_rate2h
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[2h]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[2h]))
+
+      - record: sli:http_errors:ratio_rate6h
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[6h]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[6h]))
+
+      - record: sli:http_errors:ratio_rate1d
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[1d]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[1d]))
+
+      - record: sli:http_errors:ratio_rate3d
+        expr: |
+          sum(rate(http_requests_total{path="/api/orders",status=~"5.."}[3d]))
+            /
+          sum(rate(http_requests_total{path="/api/orders"}[3d]))
+
+      # How much of the 30-day budget is left, 0..1. This is the number you
+      # put in front of a product manager, because it is the number that
+      # decides whether you ship features or reliability work this month.
+      - record: slo:error_budget_remaining:ratio
+        expr: |
+          1 - (
+            (
+              sum(increase(http_requests_total{path="/api/orders",status=~"5.."}[30d]))
+                /
+              sum(increase(http_requests_total{path="/api/orders"}[30d]))
+            ) / 0.005
+          )
+
+      # Latency SLI: proportion of requests faster than 500ms, read straight
+      # off the histogram bucket. NOT a quantile — a quantile of a quantile is
+      # meaningless when you aggregate across instances, and this is exact.
+      - record: sli:http_latency:good_ratio_rate5m
+        expr: |
+          sum(rate(http_request_duration_seconds_bucket{path="/api/orders",le="0.5"}[5m]))
+            /
+          sum(rate(http_request_duration_seconds_count{path="/api/orders"}[5m]))
+
+# ---------------------------------------------------------------------------
+# Multi-window, multi-burn-rate alerting (Google SRE Workbook, ch. 5)
+#
+# Burn rate = how many times faster than "budget-neutral" you are consuming
+# the budget. 1× exhausts it exactly at 30 days. 14.4× exhausts it in ~2 days.
+#
+# Each alert pairs a LONG window (is this real?) with a SHORT window (is it
+# still happening?). The short window is what stops an alert firing for an
+# hour after the incident is already over.
+#
+#   threshold = burn_rate × (1 - SLO) = burn_rate × 0.005
+# ---------------------------------------------------------------------------
+  - name: slo_burn_rate
+    rules:
+      - alert: OrdersAPIErrorBudgetFastBurn
+        expr: |
+          sli:http_errors:ratio_rate1h  > (14.4 * 0.005)
+            and
+          sli:http_errors:ratio_rate5m  > (14.4 * 0.005)
+        for: 2m
+        labels:
+          severity: page
+          slo: orders-api-availability
+        annotations:
+          summary: "Fast burn: 2% of the 30-day budget in 1 hour"
+          description: >-
+            Burning error budget 14.4× faster than sustainable. At this rate the
+            entire 30-day budget is gone in ~2 days. Page.
+          runbook: "Check recent deploys first: kubectl -n lab3 rollout history deploy/api"
+
+      - alert: OrdersAPIErrorBudgetMediumBurn
+        expr: |
+          sli:http_errors:ratio_rate6h  > (6 * 0.005)
+            and
+          sli:http_errors:ratio_rate30m > (6 * 0.005)
+        for: 15m
+        labels:
+          severity: page
+          slo: orders-api-availability
+        annotations:
+          summary: "Medium burn: 5% of the 30-day budget in 6 hours"
+
+      - alert: OrdersAPIErrorBudgetSlowBurn
+        expr: |
+          sli:http_errors:ratio_rate1d > (3 * 0.005)
+            and
+          sli:http_errors:ratio_rate2h > (3 * 0.005)
+        for: 1h
+        labels:
+          severity: ticket          # a TICKET, not a page. Nobody wakes up for this.
+          slo: orders-api-availability
+        annotations:
+          summary: "Slow burn: 10% of the 30-day budget in 1 day"
+
+      - alert: OrdersAPIErrorBudgetVerySlowBurn
+        expr: |
+          sli:http_errors:ratio_rate3d > (1 * 0.005)
+            and
+          sli:http_errors:ratio_rate6h > (1 * 0.005)
+        for: 3h
+        labels:
+          severity: ticket
+          slo: orders-api-availability
+        annotations:
+          summary: "Sustained burn above budget-neutral for 3 days"
+
+  - name: leading_indicators
+    rules:
+      # Queue lag moves before users notice. This is the alert that lets you
+      # fix it during business hours instead of at 3am.
+      - alert: WorkerQueueBacklogGrowing
+        expr: worker_queue_depth > 500 and deriv(worker_queue_depth[10m]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Queue depth {{ $value }} and still climbing"
+          description: "Consumers are not keeping up. Leading indicator — act before it becomes user-visible."
+
+      # The alert everyone forgets: if the target disappears, every SLO query
+      # returns no data, and "no data" is not the same as "healthy". Without
+      # this, an outage can look like silence.
+      - alert: OrdersAPITargetDown
+        expr: up{job="api"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Prometheus cannot scrape the API — SLO data is blind"

@@ -1,0 +1,11 @@
+# Compose: `environment:` block inline in the service.
+# K8s:     non-secret config lives here, mounted by envFrom.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: lab3
+data:
+  REDIS_URL: "redis://redis:6379/0"
+  LOG_LEVEL: "info"
+  SLOW_MODE: "false"          # flip to "true" for Exercise 4 (restart storm)

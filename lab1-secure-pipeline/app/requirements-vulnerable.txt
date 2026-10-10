@@ -1,0 +1,11 @@
+# EXERCISE 2 — swap this in to watch the scan fail the build.
+#
+# These are OLD, KNOWN-VULNERABLE pins, here on purpose. Never merge this file.
+#   requests 2.19.1  -> CVE-2018-18074 (credential leak on redirect)
+#   PyYAML   5.1     -> CVE-2020-1747  (arbitrary code exec via full_load)
+#   Jinja2   2.10    -> CVE-2019-10906 (sandbox escape)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+requests==2.19.1
+PyYAML==5.1
+Jinja2==2.10

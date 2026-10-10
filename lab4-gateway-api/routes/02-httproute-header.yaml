@@ -1,0 +1,66 @@
+# STEP 5a — header-based routing. Under Ingress this needed either a second
+# controller-specific annotation dialect or a service mesh. Here it's a field.
+#
+# Test:  curl -H 'Host: lab3.localdev.me' -H 'x-canary: true' localhost:8888/api/queue
+#
+# ⚠️ NOTE THE FILTER ON *BOTH* RULES.
+#
+# Filters are per-RULE, not per-route. The first version of this file defined
+# the header rule without the URLRewrite that rule 2 has, and the result was a
+# very convincing red herring:
+#
+#   $ curl -i -H 'x-canary: true' .../api/queue
+#   HTTP/1.1 404 Not Found
+#   server: uvicorn            <- the 404 came from the APP, not the gateway
+#
+# Routing was working perfectly. The canary received `/api/queue` unrewritten,
+# had no such route, and returned its own 404. Every gateway-side status field
+# said Accepted=True / ResolvedRefs=True, because nothing was wrong with them.
+#
+# The tell is the `server:` header: `envoy` means the gateway rejected it,
+# `uvicorn` means your app did — so the request got there and the problem is
+# the path, not the routing.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-canary-by-header
+  namespace: lab3
+spec:
+  parentRefs:
+    - name: lab-gateway
+  hostnames:
+    - "lab3.localdev.me"
+  rules:
+    # More specific rules are matched first — the spec defines the precedence
+    # order explicitly (exact path > prefix length > method > header count),
+    # rather than leaving it to each controller. That determinism is the
+    # under-appreciated win.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+          headers:
+            - name: x-canary
+              value: "true"
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: api-canary
+          port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: api
+          port: 80

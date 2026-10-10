@@ -1,0 +1,31 @@
+# STEP 3 — owned by the APP team. This is the file you'd actually let a product
+# squad merge without review.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-route
+  namespace: lab3
+spec:
+  parentRefs:
+    - name: lab-gateway
+      sectionName: http
+  hostnames:
+    - "lab3.localdev.me"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      filters:
+        # Replaces the nginx rewrite-target ANNOTATION with a typed, portable,
+        # schema-validated field. If you get it wrong, the API server rejects
+        # it — instead of the annotation silently doing nothing, which is what
+        # used to happen.
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: api
+          port: 80

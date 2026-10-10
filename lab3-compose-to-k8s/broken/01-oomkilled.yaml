@@ -1,0 +1,20 @@
+# EXERCISE 5 — OOMKilled.
+# Apply this, then: curl localhost:8080/burn?mb=400
+# Watch: kubectl -n lab3 get pods -w   →  OOMKilled, then CrashLoopBackOff.
+# Then: kubectl -n lab3 describe pod <name> | grep -A5 'Last State'
+#
+# The lesson: the memory LIMIT is enforced by the kernel cgroup. There is no
+# graceful signal — SIGKILL. Your app cannot catch it, cannot log, cannot flush.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: lab3
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits:   { memory: 128Mi }     # /burn?mb=400 cannot fit

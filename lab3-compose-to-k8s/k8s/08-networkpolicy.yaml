@@ -1,0 +1,24 @@
+# Default in Kubernetes: every pod can talk to every other pod. This locks
+# Redis down to only the api and worker. kind's default CNI does NOT enforce
+# NetworkPolicy — `make kind-cilium` (see README) if you want it to actually bite.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-app-only
+  namespace: lab3
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api
+        - podSelector:
+            matchLabels:
+              app: worker
+      ports:
+        - protocol: TCP
+          port: 6379

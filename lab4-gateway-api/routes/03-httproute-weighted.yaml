@@ -1,0 +1,23 @@
+# STEP 5b — weighted traffic split: 90/10 canary. THE feature people install a
+# whole service mesh to get. It's core Gateway API.
+#
+# This is the mechanism behind Argo Rollouts / Flagger progressive delivery
+# (Lab 10 territory, and doc 10_GitOps_and_Deployment_Strategies).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api-weighted
+  namespace: lab3
+spec:
+  parentRefs:
+    - name: lab-gateway
+  hostnames:
+    - "canary.localdev.me"
+  rules:
+    - backendRefs:
+        - name: api
+          port: 80
+          weight: 90
+        - name: api-canary
+          port: 80
+          weight: 10
